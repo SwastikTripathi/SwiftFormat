@@ -15,16 +15,28 @@ public extension FormatRule {
     ) { formatter in
         // Ownership modifiers can't be removed from noncopyable types
         let noncopyableTypeNames = formatter.noncopyableTypeNames()
+        let typealiasTargetNames = formatter.typealiasTargetNames()
         func isNoncopyableType(named name: String?) -> Bool {
-            guard let name else { return false }
-            if noncopyableTypeNames.contains(name) {
-                return true
+            guard var name else { return false }
+            var visitedNames = Set<String>()
+            while visitedNames.insert(name).inserted {
+                if noncopyableTypeNames.contains(name) {
+                    return true
+                }
+                if let fileURL = formatter.currentFileURL,
+                   formatter.projectIndex(requiring: [.declarations])?.isNoncopyableType(
+                       named: name,
+                       visibleFrom: fileURL
+                   ) == true
+                {
+                    return true
+                }
+                // A typealias like `typealias Handle = UnsafeHandle<Element>` is noncopyable
+                // if the type it refers to is
+                guard let targetName = typealiasTargetNames[name] else { return false }
+                name = targetName
             }
-            guard let fileURL = formatter.currentFileURL else { return false }
-            return formatter.projectIndex(requiring: [.declarations])?.isNoncopyableType(
-                named: name,
-                visibleFrom: fileURL
-            ) ?? false
+            return false
         }
 
         // Whether `Self` in the type enclosing the given index may be noncopyable,
@@ -121,6 +133,22 @@ extension Formatter {
             }
         }
         return names
+    }
+
+    /// The names of the types referred to by the typealiases in this file,
+    /// e.g. `["Handle": "UnsafeHandle"]` for `typealias Handle = UnsafeHandle<Element>`
+    func typealiasTargetNames() -> [String: String] {
+        var targetNames = [String: String]()
+        forEach(.keyword("typealias")) { i, _ in
+            guard let nameIndex = index(of: .nonSpaceOrCommentOrLinebreak, after: i),
+                  tokens[nameIndex].isIdentifier,
+                  let equalsIndex = index(of: .operator("=", .infix), after: nameIndex),
+                  let typeIndex = index(of: .nonSpaceOrCommentOrLinebreak, after: equalsIndex),
+                  let targetName = parseType(at: typeIndex)?.nominalTypeName
+            else { return }
+            targetNames[tokens[nameIndex].string] = targetName
+        }
+        return targetNames
     }
 
     /// Whether the given range contains a `~Copyable` suppression,

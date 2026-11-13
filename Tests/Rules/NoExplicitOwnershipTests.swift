@@ -253,6 +253,64 @@ final class NoExplicitOwnershipTests: XCTestCase {
         try testProjectFormatting(for: input, output, declarations: declarations)
     }
 
+    func testDoesntRemoveOwnershipKeywordsFromTypealiasOfNoncopyableType() {
+        let input = """
+        struct Handle<Element: ~Copyable>: ~Copyable {}
+
+        struct Deque<Element: ~Copyable>: ~Copyable {
+            typealias _Handle = Handle<Element>
+            typealias _Count = Int
+
+            func push(_ handle: consuming _Handle, count: consuming _Count) {
+                store(handle, count)
+            }
+        }
+        """
+
+        let output = """
+        struct Handle<Element: ~Copyable>: ~Copyable {}
+
+        struct Deque<Element: ~Copyable>: ~Copyable {
+            typealias _Handle = Handle<Element>
+            typealias _Count = Int
+
+            func push(_ handle: consuming _Handle, count: _Count) {
+                store(handle, count)
+            }
+        }
+        """
+
+        testFormatting(for: input, output, rule: .noExplicitOwnership)
+    }
+
+    func testProjectDoesntRemoveOwnershipKeywordsFromTypealiasOfNoncopyableTypeInAnotherFile() throws {
+        let declarations = """
+        struct Handle<Element: ~Copyable>: ~Copyable {}
+        """
+
+        let input = """
+        struct Deque<Element: ~Copyable>: ~Copyable {
+            typealias _Handle = Handle<Element>
+            typealias _Box = [Element]
+
+            init(_handle: consuming _Handle) {}
+            init(_box: consuming _Box) {}
+        }
+        """
+
+        let output = """
+        struct Deque<Element: ~Copyable>: ~Copyable {
+            typealias _Handle = Handle<Element>
+            typealias _Box = [Element]
+
+            init(_handle: consuming _Handle) {}
+            init(_box: _Box) {}
+        }
+        """
+
+        try testProjectFormatting(for: input, output, declarations: declarations)
+    }
+
     func testDoesntRemoveEnumCasesNamedConsumingOrBorrowing() {
         let input = """
         enum Ownership {
